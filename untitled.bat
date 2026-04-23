@@ -4,8 +4,8 @@ setlocal enabledelayedexpansion
 echo bootstrap
 
 set "DESKTOP=%USERPROFILE%\Desktop"
-set "ROOT=%USERPROFILE%\TaskBuilderWPF"
-set "APPDIR=%ROOT%\TaskApp"
+set "ROOT=%USERPROFILE%\TaskBuilderForms"
+set "APP=%ROOT%\TaskApp"
 set "OUT=%DESKTOP%\task.exe"
 
 if exist "%OUT%" del /f /q "%OUT%"
@@ -22,127 +22,114 @@ if exist "%ROOT%" rmdir /s /q "%ROOT%"
 mkdir "%ROOT%"
 cd /d "%ROOT%"
 
-dotnet new wpf -n TaskApp -f net8.0 >nul
+dotnet new winforms -n TaskApp -f net8.0 >nul
+cd /d "%APP%"
 
-cd /d "%APPDIR%"
-
-(
-echo ^<Window x:Class="TaskApp.MainWindow"
-echo xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-echo xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-echo Title="Task Manager" Height="650" Width="1000"
-echo Background="#1e1e1e" Foreground="White"^>
-echo ^<Grid Margin="10"^>
-echo ^<Grid.RowDefinitions^>
-echo ^<RowDefinition Height="Auto"/^>
-echo ^<RowDefinition Height="*"/^>
-echo ^</Grid.RowDefinitions^>
-echo ^<TextBox Name="SearchBox" Height="30" Margin="0,0,0,10"/^>
-echo ^<DataGrid Name="Grid" Grid.Row="1" AutoGenerateColumns="False"/^>
-echo ^</Grid^>
-echo ^</Window^>
-) > MainWindow.xaml
+del Program.cs
 
 (
 echo using System;
 echo using System.Diagnostics;
 echo using System.Linq;
-echo using System.Windows;
+echo using System.Windows.Forms;
+echo using System.Drawing;
 echo using System.Collections.Generic;
 echo.
-echo namespace TaskApp
+echo public class MainForm : Form
 echo {
-echo     public partial class MainWindow : Window
+echo     DataGridView grid = new DataGridView();
+echo     TextBox search = new TextBox();
+echo     Button kill = new Button();
+echo     Timer timer = new Timer();
+echo     List^<Process^> cache = new List^<Process^>();
+echo.
+echo     public MainForm()
 echo     {
-echo         public MainWindow()
-echo         {
-echo             InitializeComponent();
-echo             Loaded += (s,e) =^> Load();
-echo             SearchBox.TextChanged += (s,e) =^> Load();
-echo         }
+echo         Text = "Task Manager Pro";
+echo         Width = 1100;
+echo         Height = 700;
+echo         BackColor = Color.FromArgb(30,30,30);
+echo         ForeColor = Color.White;
 echo.
-echo         void Load()
-echo         {
-echo             string f = SearchBox.Text?.ToLower() ?? "";
-echo             var list = new List^<object^>();
+echo         search.Dock = DockStyle.Top;
+echo         search.Font = new Font("Segoe UI", 12);
+echo         search.PlaceholderText = "Search processes...";
+echo         Controls.Add(search);
 echo.
-echo             foreach (var p in Process.GetProcesses().Take(300))
+echo         kill.Text = "Kill Process";
+echo         kill.Dock = DockStyle.Bottom;
+echo         kill.Height = 45;
+echo         kill.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+echo         kill.Click += KillSelected;
+echo         Controls.Add(kill);
+echo.
+echo         grid.Dock = DockStyle.Fill;
+echo         grid.ReadOnly = true;
+echo         grid.AllowUserToAddRows = false;
+echo         grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+echo         grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+echo         grid.BackgroundColor = Color.FromArgb(20,20,20);
+echo         grid.GridColor = Color.FromArgb(50,50,50);
+echo         Controls.Add(grid);
+echo.
+echo         grid.ColumnCount = 4;
+echo         grid.Columns[0].Name = "PID";
+echo         grid.Columns[1].Name = "Name";
+echo         grid.Columns[2].Name = "CPU";
+echo         grid.Columns[3].Name = "Memory MB";
+echo.
+echo         search.TextChanged += (s,e) =^> LoadProcesses();
+echo.
+echo         timer.Interval = 1500;
+echo         timer.Tick += (s,e) =^> LoadProcesses();
+echo         timer.Start();
+echo.
+echo         LoadProcesses();
+echo     }
+echo.
+echo     void LoadProcesses()
+echo     {
+echo         grid.Rows.Clear();
+echo         string filter = search.Text.ToLower();
+echo.
+echo         foreach (var p in Process.GetProcesses().Take(400))
+echo         {
+echo             try
 echo             {
-echo                 try
-echo                 {
-echo                     if (!string.IsNullOrEmpty(f) ^&^& !p.ProcessName.ToLower().Contains(f))
-echo                         continue;
+echo                 if (!string.IsNullOrEmpty(filter) ^&^& !p.ProcessName.ToLower().Contains(filter))
+echo                     continue;
 echo.
-echo                     list.Add(new
-echo                     {
-echo                         PID = p.Id,
-echo                         Name = p.ProcessName,
-echo                         Memory = p.WorkingSet64 / 1024 / 1024
-echo                     });
-echo                 }
-echo                 catch {}
+echo                 grid.Rows.Add(
+echo                     p.Id,
+echo                     p.ProcessName,
+echo                     "N/A",
+echo                     Math.Round(p.WorkingSet64 / 1024.0 / 1024.0,1)
+echo                 );
 echo             }
-echo.
-echo             Grid.ItemsSource = list;
+echo             catch {}
 echo         }
 echo     }
-echo }
-) > MainWindow.xaml.cs
-
-dotnet publish -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true >nul
-
-copy /Y bin\Release\net8.0-windows\win-x64\publish\TaskApp.exe "%OUT%"
-
-echo Done
-pauseecho.
-echo         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
-echo         {
-echo             Grid.Columns.Add(new DataGridTextColumn { Header="PID", Binding=new System.Windows.Data.Binding("PID") });
-echo             Grid.Columns.Add(new DataGridTextColumn { Header="Name", Binding=new System.Windows.Data.Binding("Name") });
-echo             Grid.Columns.Add(new DataGridTextColumn { Header="Memory MB", Binding=new System.Windows.Data.Binding("Memory") });
 echo.
+echo     void KillSelected(object sender, EventArgs e)
+echo     {
+echo         if (grid.SelectedRows.Count == 0) return;
+echo         try
+echo         {
+echo             int pid = Convert.ToInt32(grid.SelectedRows[0].Cells[0].Value);
+echo             Process.GetProcessById(pid).Kill();
 echo             LoadProcesses();
 echo         }
-echo.
-echo         private void LoadProcesses()
-echo         {
-echo             string filter = SearchBox.Text?.ToLower() ?? "";
-echo             var list = new List^<object^>();
-echo.
-echo             foreach (var p in Process.GetProcesses().Take(300))
-echo             {
-echo                 try
-echo                 {
-echo                     if (!string.IsNullOrEmpty(filter) ^&^& !p.ProcessName.ToLower().Contains(filter))
-echo                         continue;
-echo.
-echo                     list.Add(new
-echo                     {
-echo                         PID = p.Id,
-echo                         Name = p.ProcessName,
-echo                         Memory = (p.WorkingSet64 / 1024 / 1024)
-echo                     });
-echo                 }
-echo                 catch { }
-echo             }
-echo.
-echo             Grid.ItemsSource = list;
-echo         }
+echo         catch {}
 echo     }
 echo }
-) > MainWindow.xaml.cs
-
-dotnet publish -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true >nul
-
-copy /Y bin\Release\net8.0-windows\win-x64\publish\TaskApp.exe "%OUT%"
-
-echo Done
-pauseecho static class Program
+echo.
+echo static class Program
 echo {
 echo     [STAThread]
 echo     static void Main()
 echo     {
-echo         ApplicationConfiguration.Initialize();
+echo         Application.EnableVisualStyles();
+echo         Application.SetCompatibleTextRenderingDefault(false);
 echo         Application.Run(new MainForm());
 echo     }
 echo }
@@ -150,7 +137,7 @@ echo }
 
 dotnet publish -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true >nul
 
-copy /Y bin\Release\net8.0-windows\win-x64\publish\TaskApp.exe "%DESKTOP%\task.exe"
+copy /Y bin\Release\net8.0-windows\win-x64\publish\TaskApp.exe "%OUT%"
 
 echo Done
 pause
