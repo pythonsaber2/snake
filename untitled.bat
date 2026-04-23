@@ -1,75 +1,84 @@
 @echo off
 echo bootstrap
 
-where python >nul 2>nul
-if %errorlevel% neq 0 (
-echo Python not found.
-pause
-exit /b
-)
-
-where git >nul 2>nul
-if %errorlevel% neq 0 (
-echo Installing Git...
-winget install --id Git.Git -e --accept-source-agreements --accept-package-agreements
-)
-
-set PROJECT=%USERPROFILE%\TaskManagerBuild
 set DESKTOP=%USERPROFILE%\Desktop
+set PROJECT=%USERPROFILE%\TaskBuilderApp
+
+where dotnet >nul 2>nul
+if %errorlevel% neq 0 (
+echo Installing .NET SDK...
+winget install --id Microsoft.DotNet.SDK.8 -e --accept-source-agreements --accept-package-agreements
+)
+
+timeout /t 2 >nul
 
 if not exist "%PROJECT%" mkdir "%PROJECT%"
 cd /d "%PROJECT%"
 
-if not exist venv (
-python -m venv venv
-)
-
-call venv\Scripts\activate.bat
-
-python -m pip install --upgrade pip
-pip install psutil PySide6 pyinstaller
+dotnet new winforms -n TaskApp -f net8.0 >nul
+cd TaskApp
 
 (
-echo import sys
-echo import psutil
-echo from PySide6.QtWidgets import QApplication,QTableWidget,QTableWidgetItem,QVBoxLayout,QWidget
-echo from PySide6.QtCore import QTimer
+echo using System;
+echo using System.Diagnostics;
+echo using System.Linq;
+echo using System.Windows.Forms;
 echo.
-echo class TaskManager(QWidget):
-echo     def __init__(self):
-echo         super().__init__()
-echo         self.setWindowTitle("Task")
-echo         self.resize(900,550)
-echo         self.table=QTableWidget()
-echo         self.table.setColumnCount(4)
-echo         self.table.setHorizontalHeaderLabels(["PID","Name","CPU %%","Memory MB"])
-echo         layout=QVBoxLayout()
-echo         layout.addWidget(self.table)
-echo         self.setLayout(layout)
-echo         self.timer=QTimer()
-echo         self.timer.timeout.connect(self.update)
-echo         self.timer.start(2000)
-echo         self.update()
+echo public class MainForm : Form
+echo {
+echo     DataGridView grid = new DataGridView();
+echo     Timer timer = new Timer();
 echo.
-echo     def update(self):
-echo         procs=list(psutil.process_iter(['pid','name','cpu_percent','memory_info']))
-echo         self.table.setRowCount(len(procs))
-echo         for r,p in enumerate(procs):
-echo             mem=p.info['memory_info'].rss/(1024*1024)
-echo             self.table.setItem(r,0,QTableWidgetItem(str(p.info['pid'])))
-echo             self.table.setItem(r,1,QTableWidgetItem(p.info['name']))
-echo             self.table.setItem(r,2,QTableWidgetItem(str(p.info['cpu_percent'])))
-echo             self.table.setItem(r,3,QTableWidgetItem(f"{mem:.1f}"))
+echo     public MainForm()
+echo     {
+echo         Text = "Task";
+echo         Width = 900;
+echo         Height = 600;
 echo.
-echo app=QApplication(sys.argv)
-echo w=TaskManager()
-echo w.show()
-echo sys.exit(app.exec())
-) > main.py
+echo         grid.Dock = DockStyle.Fill;
+echo         Controls.Add(grid);
+echo.
+echo         grid.ColumnCount = 4;
+echo         grid.Columns[0].Name = "PID";
+echo         grid.Columns[1].Name = "Name";
+echo         grid.Columns[2].Name = "CPU";
+echo         grid.Columns[3].Name = "Memory";
+echo.
+echo         timer.Interval = 2000;
+echo         timer.Tick += (s, e) =^> Load();
+echo         timer.Start();
+echo.
+echo         Load();
+echo     }
+echo.
+echo     void Load()
+echo     {
+echo         grid.Rows.Clear();
+echo         foreach (var p in Process.GetProcesses().Take(200))
+echo         {
+echo             try
+echo             {
+echo                 grid.Rows.Add(p.Id, p.ProcessName, "N/A", p.WorkingSet64 / 1024 / 1024 + " MB");
+echo             }
+echo             catch {}
+echo         }
+echo     }
+echo }
+echo.
+echo static class Program
+echo {
+echo     [STAThread]
+echo     static void Main()
+echo     {
+echo         ApplicationConfiguration.Initialize();
+echo         Application.Run(new MainForm());
+echo     }
+echo }
+) > Program.cs
 
-pyinstaller --noconfirm --onefile --windowed --name task main.py
+dotnet publish -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true >nul
 
-copy /Y dist\task.exe "%DESKTOP%\task.exe"
+copy /Y bin\Release\net8.0-windows\win-x64\publish\TaskApp.exe "%DESKTOP%\task.exe"
 
-echo Done.
+echo Done
 pause
